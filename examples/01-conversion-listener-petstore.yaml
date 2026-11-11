@@ -1,0 +1,130 @@
+_format_version: "3.0"
+
+# 01 - conversion-listener: expose the Petstore REST API as MCP tools.
+#
+#   MCP endpoint:  https://<proxy-url>/petstore
+#
+# How a tool call travels:
+#   tools/call find-pets-by-status {query_status: available}
+#     -> Kong calls its OWN route:  GET /petstore/pet/findByStatus?status=available
+#        (tool path "pet/findByStatus" has no leading "/", so it is relative to the route path /petstore)
+#     -> route strips /petstore, Service URL adds /api/v3
+#     -> upstream: GET https://petstore3.swagger.io/api/v3/pet/findByStatus?status=available
+#
+# A leading "/" (e.g. /api/v3/pet/findByStatus) makes Kong look for a route matching that
+# exact path -> "HTTP call failed with status 404: no Route matched".
+#
+# select_tags: decK only manages entities with this tag, so syncing this file never
+# deletes anything else in the control plane.
+_info:
+  select_tags:
+    - petstore-mcp
+
+services:
+  - name: petstore
+    url: https://petstore3.swagger.io/api/v3
+    routes:
+      - name: petstore-mcp
+        paths:
+          - /petstore
+        strip_path: true
+        plugins:
+          - name: ai-mcp-proxy
+            config:
+              mode: conversion-listener
+              server:
+                timeout: 60000
+              logging:
+                log_statistics: true
+                log_payloads: false
+                log_audits: false
+              max_request_body_size: 32768
+              tools:
+                # ---------- Pets ----------
+                - name: find-pets-by-status
+                  description: Find pets by status. status must be one of available, pending, sold.
+                  method: GET
+                  path: pet/findByStatus
+                  annotations:
+                    title: Find pets by status
+                    read_only_hint: true
+                  parameters:
+                    - name: status
+                      in: query
+                      required: true
+                      description: Pet status to filter by
+                      schema:
+                        type: string
+                        enum: [available, pending, sold]
+
+                - name: find-pets-by-tags
+                  description: Find pets that have any of the given tags.
+                  method: GET
+                  path: pet/findByTags
+                  annotations:
+                    title: Find pets by tags
+                    read_only_hint: true
+                  parameters:
+                    - name: tags
+                      in: query
+                      required: true
+                      description: Tags to filter by
+                      schema:
+                        type: array
+                        items:
+                          type: string
+
+                - name: get-pet-by-id
+                  description: Get a single pet by its numeric ID.
+                  method: GET
+                  path: pet/{petId}
+                  annotations:
+                    title: Get pet by ID
+                    read_only_hint: true
+                  parameters:
+                    - name: petId
+                      in: path
+                      required: true
+                      description: ID of the pet to return
+                      schema:
+                        type: integer
+
+                # ---------- Store ----------
+                - name: get-store-inventory
+                  description: Return pet inventory counts grouped by status.
+                  method: GET
+                  path: store/inventory
+                  annotations:
+                    title: Get store inventory
+                    read_only_hint: true
+
+                - name: get-order-by-id
+                  description: Get a purchase order by its numeric ID.
+                  method: GET
+                  path: store/order/{orderId}
+                  annotations:
+                    title: Get order by ID
+                    read_only_hint: true
+                  parameters:
+                    - name: orderId
+                      in: path
+                      required: true
+                      description: ID of the order to fetch
+                      schema:
+                        type: integer
+
+                # ---------- Users ----------
+                - name: get-user-by-username
+                  description: Get a user by username. Use user1 for testing.
+                  method: GET
+                  path: user/{username}
+                  annotations:
+                    title: Get user by username
+                    read_only_hint: true
+                  parameters:
+                    - name: username
+                      in: path
+                      required: true
+                      description: Username to fetch
+                      schema:
+                        type: string

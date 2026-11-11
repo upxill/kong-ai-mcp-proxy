@@ -1,0 +1,60 @@
+_format_version: "3.0"
+
+# 02 - Petstore MCP endpoint protected by an API key.
+#   MCP endpoint: https://<proxy-url>/petstore-secure   (header: apikey: <key>)
+#
+#   export DECK_CLAUDE_CODE_KEY="$(openssl rand -hex 24)"
+#   deck gateway sync examples/02-key-auth.yaml <flags>
+#
+# The client's apikey header is forwarded to the internal tool calls
+# (server.forward_client_headers defaults to true), which pass the same key-auth.
+_info:
+  select_tags:
+    - mcp-example-02
+
+services:
+  - name: petstore-secure
+    url: https://petstore3.swagger.io/api/v3
+    routes:
+      - name: petstore-secure-mcp
+        paths:
+          - /petstore-secure
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names: [apikey]
+              # Keep hide_credentials false: tool calls re-enter this route and must
+              # carry the forwarded apikey header to pass key-auth again.
+              hide_credentials: false
+          - name: ai-mcp-proxy
+            config:
+              mode: conversion-listener
+              server:
+                timeout: 60000
+                forward_client_headers: true
+              logging:
+                log_statistics: true
+                log_payloads: false
+                log_audits: false
+              tools:
+                - name: find-pets-by-status
+                  description: Find pets by status. status must be one of available, pending, sold.
+                  method: GET
+                  path: pet/findByStatus
+                  annotations: {title: Find pets by status, read_only_hint: true}
+                  parameters:
+                    - name: status
+                      in: query
+                      required: true
+                      schema: {type: string, enum: [available, pending, sold]}
+                - name: get-store-inventory
+                  description: Return pet inventory counts grouped by status.
+                  method: GET
+                  path: store/inventory
+                  annotations: {title: Get store inventory, read_only_hint: true}
+
+consumers:
+  - username: claude-code
+    keyauth_credentials:
+      - key: ${{ env "DECK_CLAUDE_CODE_KEY" }}

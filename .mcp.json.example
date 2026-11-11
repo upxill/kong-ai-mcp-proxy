@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "petstore": {
+      "type": "http",
+      "url": "https://<proxy-url>/petstore"
+    },
+    "petstore-secure": {
+      "type": "http",
+      "url": "https://<proxy-url>/petstore-secure",
+      "headers": { "apikey": "${PETSTORE_MCP_KEY}" }
+    }
+  }
+}

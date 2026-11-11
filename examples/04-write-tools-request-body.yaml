@@ -1,0 +1,98 @@
+_format_version: "3.0"
+
+# 04 - Tools that change data: JSON request bodies, query-only updates, deletes.
+#   MCP endpoint: https://<proxy-url>/petstore-write
+#
+# Body arguments arrive as one "body" argument, e.g.
+#   {"name":"add-pet","arguments":{"body":{"name":"Rex","photoUrls":[],"status":"available"}}}
+#
+# Petstore is a public demo; writes are visible to everyone and reset periodically.
+# Protect write tools with auth + ACLs in real use (see 02 and 03).
+_info:
+  select_tags:
+    - mcp-example-04
+
+services:
+  - name: petstore-write
+    url: https://petstore3.swagger.io/api/v3
+    routes:
+      - name: petstore-write-mcp
+        paths:
+          - /petstore-write
+        strip_path: true
+        plugins:
+          - name: ai-mcp-proxy
+            config:
+              mode: conversion-listener
+              server:
+                timeout: 60000
+              logging:
+                log_statistics: true
+                log_payloads: false
+                log_audits: false
+              tools:
+                - name: add-pet
+                  description: Add a new pet to the store. Returns the created pet with its id.
+                  method: POST
+                  path: pet
+                  headers:
+                    Accept: application/json
+                  annotations: {title: Add pet, destructive_hint: false}
+                  request_body:
+                    required: true
+                    content:
+                      application/json:
+                        schema:
+                          type: object
+                          required: [name, photoUrls]
+                          properties:
+                            id: {type: integer, description: Optional id; server assigns one if omitted}
+                            name: {type: string}
+                            status: {type: string, enum: [available, pending, sold]}
+                            photoUrls: {type: array, items: {type: string}}
+                  responses:
+                    "200":
+                      description: The created pet
+                      content:
+                        application/json:
+                          schema:
+                            type: object
+                            properties:
+                              id: {type: integer}
+                              name: {type: string}
+                              status: {type: string}
+
+                - name: update-pet-name-status
+                  description: Update a pet's name and/or status by ID.
+                  method: POST
+                  path: pet/{petId}
+                  annotations: {title: Update pet, idempotent_hint: true}
+                  parameters:
+                    - {name: petId, in: path, required: true, schema: {type: integer}}
+                    - {name: name, in: query, required: false, schema: {type: string}}
+                    - {name: status, in: query, required: false, schema: {type: string, enum: [available, pending, sold]}}
+
+                - name: place-order
+                  description: Place an order for a pet. Returns the order.
+                  method: POST
+                  path: store/order
+                  annotations: {title: Place order}
+                  request_body:
+                    required: true
+                    content:
+                      application/json:
+                        schema:
+                          type: object
+                          required: [petId, quantity]
+                          properties:
+                            petId: {type: integer}
+                            quantity: {type: integer, minimum: 1}
+                            status: {type: string, enum: [placed, approved, delivered]}
+
+                - name: delete-order
+                  description: Delete a purchase order by ID. Cannot be undone.
+                  method: DELETE
+                  path: store/order/{orderId}
+                  annotations: {title: Delete order, destructive_hint: true}
+                  parameters:
+                    - {name: orderId, in: path, required: true, schema: {type: integer}}

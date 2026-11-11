@@ -1,0 +1,19 @@
+# Secrets
+.env
+*.env
+*.tfvars
+!*.tfvars.example
+.mcp.json
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+
+# decK exports can contain secrets
+current.yaml
+*.dump.yaml
+
+.DS_Store

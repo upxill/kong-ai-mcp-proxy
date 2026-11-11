@@ -1,0 +1,47 @@
+_format_version: "3.0"
+
+# 06 - passthrough-listener: put Kong in front of an EXISTING MCP server.
+#   MCP endpoint: https://<proxy-url>/remote-mcp
+#
+# Kong forwards MCP traffic to the Service URL unchanged and adds auth, ACLs,
+# rate limiting, logging and MCP metrics. The upstream server keeps its own tools
+# and sessions.
+#
+# Replace the url with your MCP server's Streamable HTTP endpoint. The value below
+# is a placeholder for a public, no-auth MCP server.
+_info:
+  select_tags:
+    - mcp-example-06
+
+services:
+  - name: remote-mcp
+    url: https://mcp.example.com/mcp          # <-- your upstream MCP server
+    routes:
+      - name: remote-mcp
+        paths:
+          - /remote-mcp
+        strip_path: true
+        plugins:
+          - name: ai-mcp-proxy
+            config:
+              mode: passthrough-listener
+              logging:
+                log_statistics: true
+                log_payloads: false
+                log_audits: true
+              # Optional: per-tool ACLs. "name" must match the upstream server's tool names.
+              # Needs an authenticated consumer (add key-auth or OIDC to this route).
+              # include_consumer_groups: true
+              # default_acl:
+              #   - scope: tools
+              #     allow: [mcp-users]
+              # tools:
+              #   - name: delete_document
+              #     description: Upstream tool (description is required by the schema)
+              #     acl:
+              #       allow: [admins]
+
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local

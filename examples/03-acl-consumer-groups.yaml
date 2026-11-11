@@ -1,0 +1,85 @@
+_format_version: "3.0"
+
+# 03 - Per-tool access control with consumer groups.
+#   MCP endpoint: https://<proxy-url>/petstore-acl
+#
+#   readers  -> see and call read-only tools
+#   admins   -> everything, including delete-pet
+#   suspended consumers are denied everywhere
+#
+#   export DECK_READER_KEY="$(openssl rand -hex 24)" DECK_ADMIN_KEY="$(openssl rand -hex 24)"
+#   deck gateway sync examples/03-acl-consumer-groups.yaml <flags>
+#
+# tools/list is filtered per caller: a reader never sees delete-pet.
+_info:
+  select_tags:
+    - mcp-example-03
+
+consumer_groups:
+  - name: readers
+  - name: admins
+
+consumers:
+  - username: alice-reader
+    groups:
+      - name: readers
+    keyauth_credentials:
+      - key: ${{ env "DECK_READER_KEY" }}
+  - username: bob-admin
+    groups:
+      - name: admins
+    keyauth_credentials:
+      - key: ${{ env "DECK_ADMIN_KEY" }}
+
+services:
+  - name: petstore-acl
+    url: https://petstore3.swagger.io/api/v3
+    routes:
+      - name: petstore-acl-mcp
+        paths:
+          - /petstore-acl
+        strip_path: true
+        plugins:
+          - name: key-auth
+            config:
+              key_names: [apikey]
+              hide_credentials: false   # tool calls re-enter this route with the forwarded key
+          - name: ai-mcp-proxy
+            config:
+              mode: conversion-listener
+              include_consumer_groups: true     # group names allowed in ACL lists
+              consumer_identifier: username     # consumer entries are usernames
+              default_acl:
+                - scope: tools
+                  allow: [readers, admins]
+                  deny: [suspended]
+              logging:
+                log_statistics: true
+                log_payloads: false
+                log_audits: true                # log every allow/deny decision
+              tools:
+                - name: find-pets-by-status
+                  description: Find pets by status. status must be one of available, pending, sold.
+                  method: GET
+                  path: pet/findByStatus
+                  annotations: {title: Find pets by status, read_only_hint: true}
+                  parameters:
+                    - {name: status, in: query, required: true, schema: {type: string, enum: [available, pending, sold]}}
+
+                - name: get-pet-by-id
+                  description: Get a single pet by its numeric ID.
+                  method: GET
+                  path: pet/{petId}
+                  annotations: {title: Get pet by ID, read_only_hint: true}
+                  parameters:
+                    - {name: petId, in: path, required: true, schema: {type: integer}}
+
+                - name: delete-pet
+                  description: Permanently delete a pet by ID. Cannot be undone.
+                  method: DELETE
+                  path: pet/{petId}
+                  annotations: {title: Delete pet, destructive_hint: true}
+                  parameters:
+                    - {name: petId, in: path, required: true, schema: {type: integer}}
+                  acl:                          # replaces default_acl for this tool
+                    allow: [admins]

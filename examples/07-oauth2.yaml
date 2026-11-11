@@ -1,0 +1,90 @@
+_format_version: "3.0"
+
+# 07 - OAuth 2.0 for MCP with the AI MCP OAuth2 plugin (tech preview, Kong 3.12+).
+#
+#   MCP endpoint: https://<proxy-url>/petstore-oauth
+#   Metadata:     https://<proxy-url>/petstore-oauth/.well-known/oauth-protected-resource
+#
+# Kong acts as an OAuth resource server: MCP clients (Claude Code, Cursor) read the
+# metadata, log the user in at your authorization server, and send a Bearer token.
+#
+# Layout (required from 3.13, where ai-mcp-oauth2 treats ALL traffic on its route as MCP):
+#   /petstore-oauth       ai-mcp-oauth2 + ai-mcp-proxy (listener)      <- clients
+#   /petstore-oauth-tools ai-mcp-proxy (conversion-only, tag oauth-petstore-tools)
+#
+# WARNING: /petstore-oauth-tools is a normal REST route. Anyone can call it directly,
+# bypassing OAuth, unless you protect it too (e.g. key-auth with a key only Kong's
+# internal calls carry via the tool's `headers`, or an upstream that checks X-User-Id).
+#
+# Fill in your IdP (Keycloak, Okta, Entra ID, Auth0...). Secrets via env:
+#   export DECK_OAUTH_CLIENT_SECRET=...
+_info:
+  select_tags:
+    - mcp-example-07
+
+services:
+  - name: petstore-oauth
+    url: https://petstore3.swagger.io/api/v3
+    routes:
+      # ---------- tools (conversion-only) ----------
+      - name: petstore-oauth-tools
+        paths:
+          - /petstore-oauth-tools
+        strip_path: true
+        plugins:
+          - name: ai-mcp-proxy
+            tags: [oauth-petstore-tools]
+            config:
+              mode: conversion-only
+              logging: {log_statistics: false, log_payloads: false, log_audits: false}
+              tools:
+                - name: find-pets-by-status
+                  description: Find pets by status. status must be one of available, pending, sold.
+                  method: GET
+                  path: pet/findByStatus
+                  annotations: {title: Find pets by status, read_only_hint: true}
+                  parameters:
+                    - {name: status, in: query, required: true, schema: {type: string, enum: [available, pending, sold]}}
+                - name: get-store-inventory
+                  description: Return pet inventory counts grouped by status.
+                  method: GET
+                  path: store/inventory
+                  annotations: {title: Get store inventory, read_only_hint: true}
+
+      # ---------- OAuth-protected MCP endpoint ----------
+      - name: petstore-oauth-mcp
+        paths:
+          - /petstore-oauth
+        strip_path: true
+        plugins:
+          - name: ai-mcp-oauth2
+            config:
+              resource: https://<proxy-url>/petstore-oauth
+              authorization_servers:
+                - https://login.example.com/realms/mcp          # issuer URL
+              scopes_supported: [openid, mcp.read]
+              # Opaque tokens -> introspection. JWTs -> remove these four lines;
+              # JWKS is discovered from the authorization server metadata.
+              introspection_endpoint: https://login.example.com/realms/mcp/protocol/openid-connect/token/introspect
+              client_id: kong-mcp
+              client_secret: ${{ env "DECK_OAUTH_CLIENT_SECRET" }}
+              client_auth: client_secret_basic
+              consumer_optional: true          # no Kong consumer needed per user
+              credential_claim: [sub]          # per-user identity for rate limiting
+              claim_to_header:
+                - claim: sub
+                  header: X-User-Id            # tell the upstream who is calling
+
+          - name: ai-mcp-proxy
+            config:
+              mode: listener
+              server:
+                tag: oauth-petstore-tools
+                timeout: 60000
+              # ACL on token claims instead of consumers
+              acl_attribute_type: oauth_access_token
+              access_token_claim_field: .groups
+              default_acl:
+                - scope: tools
+                  allow: [mcp-users]
+              logging: {log_statistics: true, log_payloads: false, log_audits: true}

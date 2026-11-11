@@ -1,0 +1,89 @@
+_format_version: "3.0"
+
+# 05 - Aggregation: tools defined per API with conversion-only, published through
+#      ONE endpoint by a listener.
+#
+#   MCP endpoint (the only one clients use): https://<proxy-url>/mcp
+#
+#   /pets-api   conversion-only  plugin tags: [petstore-tools]  -> pet tools
+#   /store-api  conversion-only  plugin tags: [petstore-tools]  -> store tools
+#   /mcp        listener         server.tag: petstore-tools     -> serves all of them
+#
+# Notes
+# - decK adds the select tag (mcp-example-05) to every entity, including plugins, so the
+#   conversion-only plugins end up tagged [mcp-example-05, petstore-tools]. The listener
+#   matches on petstore-tools.
+# - ACL settings (default_acl, include_consumer_groups...) belong on the listener.
+_info:
+  select_tags:
+    - mcp-example-05
+
+services:
+  - name: petstore-agg
+    url: https://petstore3.swagger.io/api/v3
+    routes:
+      # ---------- Pet API tools (not served directly) ----------
+      - name: pets-api
+        paths:
+          - /pets-api
+        strip_path: true
+        plugins:
+          - name: ai-mcp-proxy
+            tags: [petstore-tools]
+            config:
+              mode: conversion-only
+              logging: {log_statistics: false, log_payloads: false, log_audits: false}
+              tools:
+                - name: find-pets-by-status
+                  description: Find pets by status. status must be one of available, pending, sold.
+                  method: GET
+                  path: pet/findByStatus
+                  annotations: {title: Find pets by status, read_only_hint: true}
+                  parameters:
+                    - {name: status, in: query, required: true, schema: {type: string, enum: [available, pending, sold]}}
+                - name: get-pet-by-id
+                  description: Get a single pet by its numeric ID.
+                  method: GET
+                  path: pet/{petId}
+                  annotations: {title: Get pet by ID, read_only_hint: true}
+                  parameters:
+                    - {name: petId, in: path, required: true, schema: {type: integer}}
+
+      # ---------- Store API tools (not served directly) ----------
+      - name: store-api
+        paths:
+          - /store-api
+        strip_path: true
+        plugins:
+          - name: ai-mcp-proxy
+            tags: [petstore-tools]
+            config:
+              mode: conversion-only
+              logging: {log_statistics: false, log_payloads: false, log_audits: false}
+              tools:
+                - name: get-store-inventory
+                  description: Return pet inventory counts grouped by status.
+                  method: GET
+                  path: store/inventory
+                  annotations: {title: Get store inventory, read_only_hint: true}
+                - name: get-order-by-id
+                  description: Get a purchase order by its numeric ID.
+                  method: GET
+                  path: store/order/{orderId}
+                  annotations: {title: Get order by ID, read_only_hint: true}
+                  parameters:
+                    - {name: orderId, in: path, required: true, schema: {type: integer}}
+
+      # ---------- The one MCP endpoint ----------
+      - name: mcp-listener
+        paths:
+          - /mcp
+        strip_path: true
+        plugins:
+          - name: ai-mcp-proxy
+            config:
+              mode: listener
+              server:
+                tag: petstore-tools
+                timeout: 60000
+              logging: {log_statistics: true, log_payloads: false, log_audits: false}
